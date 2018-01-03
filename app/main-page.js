@@ -28,6 +28,12 @@ if (app.android) {
     var mCaptureCallback;
     var mFlashSupported;
     var mFile;
+    var ORIENTATIONS = new android.util.SparseIntArray();
+    
+    ORIENTATIONS.append(android.view.Surface.ROTATION_0, 90);
+    ORIENTATIONS.append(android.view.Surface.ROTATION_90, 0);
+    ORIENTATIONS.append(android.view.Surface.ROTATION_180, 270);
+    ORIENTATIONS.append(android.view.Surface.ROTATION_270, 180);
 }
 
 var STATE_PREVIEW = 0;
@@ -61,7 +67,9 @@ function onTakeShot(args) {
 exports.onTakeShot = onTakeShot;
 
 function lockFocus() {
-    // console.log("lockFocus");
+    console.log("lockFocus");
+    mPreviewRequestBuilder.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_TRIGGER, new java.lang.Integer(android.hardware.camera2.CameraMetadata.CONTROL_AF_TRIGGER_START));
+    mPreviewRequestBuilder.set(android.hardware.camera2.CaptureRequest.FLASH_MODE, new java.lang.Integer(android.hardware.camera2.CameraMetadata.FLASH_MODE_TORCH));
     mState = STATE_WAITING_LOCK;
     mCaptureSession.capture(mPreviewRequestBuilder.build(), mCaptureCallback, mBackgroundHandler);
 }
@@ -80,18 +88,57 @@ function captureStillPicture() {
     captureBuilder.addTarget(mImageReader.getSurface());
 
     // Use the same AE and AF modes as the preview.
+    captureBuilder.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, new java.lang.Integer(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE));
     setAutoFlash(captureBuilder);
 
-    var CaptureCallback = android.hardware.camera2.CameraCaptureSession.CaptureCallback.extend({
+    // Orientation
+    var rotation = app.android.context.getSystemService(android.content.Context.WINDOW_SERVICE).getDefaultDisplay().getRotation();
+    captureBuilder.set(android.hardware.camera2.CaptureRequest.JPEG_ORIENTATION, new java.lang.Integer(ORIENTATIONS.get(rotation))); 
+
+
+    var captureListener = android.hardware.camera2.CameraCaptureSession.CaptureCallback.extend({
+        onCaptureProgressed: function (session, request, partialResult) {
+            console.log("onCaptureProgressed");
+        },
         onCaptureCompleted: function (session, request, result) {
             console.log("onCaptureCompleted");
-            // console.log(mFile.toString());
+            console.log("Saved at :"+ mFile);
+            unlockFocus();
+            if (callback && typeof(callback) === "function") {
+                console.log("Sending path at callback :"+ file.getAbsolutePath());
+                callback(mFile.getAbsolutePath());
+            }
+        },
+        onCaptureFailed: function (session, request, failure) {
+            console.log("onCaptureFailed");
+            console.log(failure);
+            if (callback && typeof(callback) === "function") {
+                console.log("Sending path at callback :"+ null);
+                callback(null);
+            }
         }
     });
 
     mCaptureSession.stopRepeating();
     mCaptureSession.abortCaptures();
-    mCaptureSession.capture(captureBuilder.build(), new CaptureCallback(), null);
+    mCaptureSession.capture(captureBuilder.build(), new captureListener(), null);
+}
+
+function unlockFocus(){
+    try {
+        // Reset the auto-focus trigger
+        mPreviewRequestBuilder.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_TRIGGER,
+            new java.lang.Integer(android.hardware.camera2.CameraMetadata.CONTROL_AF_TRIGGER_CANCEL));
+        setAutoFlash(mPreviewRequestBuilder);
+        mCaptureSession.capture(mPreviewRequestBuilder.build(), mCaptureCallback,
+                mBackgroundHandler);
+        // After this, the camera will go back to the normal state of preview.
+        mState = STATE_PREVIEW;
+        mCaptureSession.setRepeatingRequest(mPreviewRequest, mCaptureCallback,
+                mBackgroundHandler);
+    } catch (e) {
+        console.log(e);
+    }
 }
 
 function setAutoFlash(requestBuilder) {
