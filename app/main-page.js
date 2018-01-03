@@ -97,8 +97,7 @@ function captureStillPicture() {
 function setAutoFlash(requestBuilder) {
     console.log("mFlashSupported in setAutoFlash:" + mFlashSupported);
     if (mFlashSupported) {
-        requestBuilder.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE,
-            android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE.CONTROL_AE_MODE_ON_AUTO_FLASH);
+        requestBuilder.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, new java.lang.Integer(android.hardware.camera2.CameraMetadata.CONTROL_AE_MODE_ON_AUTO_FLASH));
     }
 }
 
@@ -238,7 +237,7 @@ var MyCameraCaptureSessionStateCallback = android.hardware.camera2.CameraCapture
 
         mCaptureSession = cameraCaptureSession;
 
-        // mPreviewRequestBuilder.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE, android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+        mPreviewRequestBuilder.set(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE,new java.lang.Integer(android.hardware.camera2.CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE));
         // // Flash is automatically enabled when necessary.
         // setAutoFlash(mPreviewRequestBuilder);
 
@@ -379,3 +378,166 @@ var MyStateCallback = android.hardware.camera2.CameraDevice.StateCallback.extend
         console.log("onClosed");
     }
 });
+takePicture = function(callback) {
+    console.log("takePicture");
+    if(mCameraDevice == null){
+        console.log("cameraDevice is null");
+        return;
+    }
+    cameraManager = app.android.context.getSystemService(android.content.Context.CAMERA_SERVICE);
+    try{
+        var characteristics = cameraManager.getCameraCharacteristics(mCameraDevice.getId());
+        var jpegSizes;
+        if(characteristics != null){
+            jpegSizes = characteristics.get(android.hardware.camera2.CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP).getOutputSizes(android.graphics.ImageFormat.JPEG);
+        }
+        var width = 480;
+        var height = 640;
+        if(jpegSizes != null && 0 < jpegSizes.length){
+            width = jpegSizes[0].getWidth();
+            height = jpegSizes[0].getHeight();
+        }
+        var reader = new android.media.ImageReader.newInstance(width,height,android.graphics.ImageFormat.JPEG,1);
+        var outputSurfaces = new java.util.ArrayList(2);
+        console.log("#### outputSurfaces "+outputSurfaces);
+        console.log("#### outputSurfaces "+typeof(outputSurfaces));
+        outputSurfaces.add(reader.getSurface());
+        outputSurfaces.add(new android.view.Surface(mTextureView.getSurfaceTexture()));
+        console.log("#### "+outputSurfaces);
+        var captureBuilder = mCameraDevice.createCaptureRequest(android.hardware.camera2.CameraDevice.TEMPLATE_STILL_CAPTURE);
+        captureBuilder.addTarget(reader.getSurface());
+        captureBuilder.set(android.hardware.camera2.CaptureRequest.CONTROL_MODE, new java.lang.Integer(android.hardware.camera2.CameraMetadata.CONTROL_MODE_AUTO));
+        var rotation = app.android.context.getSystemService(android.content.Context.WINDOW_SERVICE).getDefaultDisplay().getRotation();
+        captureBuilder.set(android.hardware.camera2.CaptureRequest.JPEG_ORIENTATION, new java.lang.Integer(ORIENTATIONS.get(rotation)));
+        if(flashMode){
+        //Flash On
+        if(mFlashSupported){
+                captureBuilder.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, new java.lang.Integer(android.hardware.camera2.CameraMetadata.CONTROL_AE_MODE_ON_ALWAYS_FLASH));
+                captureBuilder.set(android.hardware.camera2.CaptureRequest.FLASH_MODE, new java.lang.Integer(android.hardware.camera2.CameraMetadata.FLASH_MODE_TORCH));
+                console.log("Flash Mode ON");
+            }
+        } else {
+        //Flash Off
+            captureBuilder.set(android.hardware.camera2.CaptureRequest.CONTROL_AE_MODE, new java.lang.Integer(android.hardware.camera2.CameraMetadata.CONTROL_AE_MODE_ON));
+            captureBuilder.set(android.hardware.camera2.CaptureRequest.FLASH_MODE, new java.lang.Integer(android.hardware.camera2.CameraMetadata.FLASH_MODE_OFF));
+            console.log("Flash Mode OFF");
+        }
+        var file = new java.io.File(utils.ad.getApplicationContext().getExternalFilesDir(null).getAbsolutePath() + "/AIMG_" + createDateTimeStamp() + ".jpg");
+        if (android.support.v4.content.ContextCompat.checkSelfPermission(app.android.context, android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            var dir = new java.io.File(android.os.Environment.getExternalStorageDirectory(),"POC");
+            if(!(dir.exists() && dir.isDirectory())){
+                dir.mkdir();
+            }
+            file = new java.io.File(android.os.Environment.getExternalStorageDirectory().getAbsolutePath() + "/POC/AIMG_" + createDateTimeStamp() + ".jpg");
+        }
+        path = file;
+        save = function (bytes) {
+            console.log("save");
+            var output;
+            try{
+                output = new java.io.FileOutputStream(file);
+                output.write(bytes);
+                console.log("output.write(bytes)");
+                output.close();
+                console.log("output.write(bytes)");
+            } catch(e){
+                console.log(e);
+                if (callback && typeof(callback) === "function") {
+                    console.log("Sending path at callback :"+ null);
+                    callback(null);
+                }
+            } finally {
+                
+            }
+        };
+        var readerListener = new android.media.ImageReader.OnImageAvailableListener({
+            onImageAvailable: function (reader) {
+                console.log("onImageAvailable");
+                try{
+                    image = reader.acquireLatestImage();
+                    buffer = image.getPlanes()[0].getBuffer();
+                    bytes = Array.create("byte", buffer.capacity());
+                    buffer.get(bytes);
+                    save(bytes);
+                    console.log("save(bytes)");
+                } catch(e){
+                    console.log(e);
+                    if (callback && typeof(callback) === "function") {
+                        console.log("Sending path at callback :"+ null);
+                        callback(null);
+                    }
+                } finally {
+                    if (image != null){
+                        image.close();
+                        console.log("image.close()");
+                    }
+                }
+            }
+        });  
+        reader.setOnImageAvailableListener(readerListener, mBackgroundHandler);
+        var captureListener = android.hardware.camera2.CameraCaptureSession.CaptureCallback.extend({
+            onCaptureProgressed: function (session, request, partialResult) {
+                console.log("onCaptureProgressed");
+            },
+            onCaptureCompleted: function (session, request, result) {
+                console.log("onCaptureCompleted");
+                console.log("Saved at :"+ file);
+                if (callback && typeof(callback) === "function") {
+                    console.log("Sending path at callback :"+ file.getAbsolutePath());
+                    callback(file.getAbsolutePath());
+                }
+            },
+            onCaptureFailed: function (session, request, failure) {
+                console.log("onCaptureFailed");
+                console.log(failure);
+                if (callback && typeof(callback) === "function") {
+                    console.log("Sending path at callback :"+ null);
+                    callback(null);
+                }
+            }
+        });
+        var cameraCaptureSessionStateCallback = android.hardware.camera2.CameraCaptureSession.StateCallback.extend({
+            onConfigured: function (cameraCaptureSession) {
+                console.log("onConfigured## " + cameraCaptureSession);
+                try{
+                    
+                    console.log("onConfigured try ");
+                    cameraCaptureSession.capture(captureBuilder.build(), new captureListener(), mBackgroundHandler);
+                } catch(e){
+                    console.log("onConfigured# " + e);
+                    if (callback && typeof(callback) === "function") {
+                        console.log("Sending path at callback :"+ null);
+                        callback(null);
+                    }
+                }        
+            },
+            onConfigureFailed: function (cameraCaptureSession) {
+                console.log("onConfigureFailed " + cameraCaptureSession);
+                if (callback && typeof(callback) === "function") {
+                    console.log("Sending path at callback :"+ null);
+                    callback(null);
+                }
+            }
+        });
+        mCameraDevice.createCaptureSession(outputSurfaces,new cameraCaptureSessionStateCallback(), mBackgroundHandler);
+    } catch(e){
+        console.log(e);
+        if (callback && typeof(callback) === "function") {
+            console.log("Sending path at callback :"+ null);
+            callback(null);
+        }
+    }
+    return path;
+};
+createDateTimeStamp = function() {
+    var result = "";
+    var date = new Date();
+    result = date.getFullYear().toString() +
+        ((date.getMonth() + 1) < 10 ? "0" + (date.getMonth() + 1).toString() : (date.getMonth() + 1).toString()) +
+        (date.getDate() < 10 ? "0" + date.getDate().toString() : date.getDate().toString()) + "_" +
+        date.getHours().toString() +
+        date.getMinutes().toString() +
+        date.getSeconds().toString();
+
+    return result;
+};
